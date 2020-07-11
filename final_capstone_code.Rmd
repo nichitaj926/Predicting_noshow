@@ -1,0 +1,117 @@
+-
+#1.Clearing the environment
+```{r}
+#To clean up any existing Environment variables
+rm(list = ls())
+gc()
+
+#Set the working directory to the Data location. It is currently set to Local Address. ( Note : Use Forward Slash in the path link)
+getwd()
+dir()
+
+#PakInstall function is used to Install and Load all the Packages passed used for the analysis and passed as a List
+pakInstall <- function(pkg){
+#Uncomment / remove # from the below code if packages have to be Installed
+   # new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+   # if (length(new.pkg)) 
+   #   install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+packages <- c("data.table","ggplot2","readxl","lubridate","zoo","stringr","openxlsx","dplyr")
+pakInstall(packages)
+
+
+```
+
+#2. Loading Data
+```{r}
+options(scipen = 999) #Disable scientific form
+#Import Data
+Data_kaggle = fread("noshow.csv")
+
+#Convert to Class - Data.Table
+class(Data_kaggle)
+
+
+#Checking objects/variable
+str(Data_kaggle)
+
+#Change to R Date Object
+Data_kaggle$ScheduledDay<-as.Date(Data_kaggle$ScheduledDay)
+Data_kaggle$AppointmentDay<-as.Date(Data_kaggle$AppointmentDay)
+#date_cols <- c("ScheduledDay","AppointmentDay")
+#Data_kaggle[,(date_cols):= lapply(.SD, function(x){as.Date(x,origin="1899-12-30")}), .SDcols = date_cols]
+str(Data_kaggle)
+
+```
+
+### 3.Basic EDA
+```{r}
+Data_kaggle[,wait_time := AppointmentDay - ScheduledDay]
+Data_kaggle[,unique(wait_time)]
+Data_kaggle[wait_time<0,.N]
+Data_kaggle1 = Data_kaggle
+Data_kaggle = Data_kaggle[wait_time>=0]
+
+cat_cols <- c("Scholarship","Alcoholism","SMS_received","Handcap","Hipertension","Diabetes")
+Data_kaggle[,(cat_cols):= lapply(.SD, function(x){as.factor(as.factor(x))}), .SDcols = cat_cols]
+
+Data_kaggle[,Age_grp := ifelse(Age<16,"Kids",ifelse(Age<46,"Adults","Old"))]
+str(Data_kaggle)
+Data_kaggle[,uniqueN(PatientId),Age_grp]
+Data_kaggle[,uniqueN(PatientId)]
+
+Agecount = Data_kaggle[,.(Agn = uniqueN(Age_grp)),PatientId]
+Data_kaggle = merge(Data_kaggle,Agecount,by ='PatientId',all.x = T)
+
+
+head(Data_kaggle[Agn>1][order(PatientId)],2)
+
+
+Data_kaggle$Age_grp<- factor(Data_kaggle$Age_grp, levels=c("Kids","Adults","Old"), labels=c(1,2,3))
+Data_kaggle[,NS_flag := ifelse(`No-show`=="No",0,1)]
+
+Data_kaggle[,`:=`(TA = .N,TN = sum(NS_flag), TY = (.N) - sum(NS_flag)),PatientId]
+
+
+Data_kaggle$Gender<- factor(Data_kaggle$Gender, levels=c("F","M"), labels=c(1,0))
+head(Data_kaggle,2)
+
+
+Data_pt = unique(Data_kaggle[order(AppointmentDay,decreasing =TRUE)],by='PatientId')
+
+Data_pt[,total_noshows := TA-TY]
+head(Data_pt,n=3)
+
+Data_pt[,prior_appointments := TA-1]
+Data_pt[,prior_noshows := total_noshows-NS_flag]
+Data_pt[,pa_pn := prior_appointments*prior_noshows]
+
+
+
+# Reading the neighbourhood and region data
+neighbourhood_region_data <- read.csv("Cleaned_Noshow_Unique.csv",header=TRUE)
+# Loading the hash library
+install.packages("hash")
+library(hash)
+neighbourhood_region_hash <- hash(neighbourhood_region_data$Neighbourhood,neighbourhood_region_data$Region)
+
+# Getting region of each patient
+region <- as.character(sapply(Data_pt$Neighbourhood,function(x){neighbourhood_region_hash[[x]]}))
+
+Data_pt <- cbind(Data_pt, region)
+Data_pt<- subset( Data_pt, select=-c(PatientId,AppointmentID,Neighbourhood,Age,Agn,TA,TN,TY,total_noshows,ScheduledDay,AppointmentDay,NS_flag) )
+str(Data_pt)
+
+head(Data_pt,n=3)
+
+```
+#4.Plots 
+```{r}
+ggplot(Data_pt, aes(x = wait_time,fill=`No-show`),`stat_bin(30`)+geom_histogram()
+ggplot(Data_pt, aes(x = Age_grp, fill=Gender))+geom_bar()
+str(Data_pt)
+fwrite(Data_pt,file="modelfinal_Noshow3.csv")
+
+
+```
